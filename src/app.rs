@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
@@ -20,22 +21,111 @@ use crate::models::{Game, PriorityClass, display_path, parse_affinity_mask};
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
-    if cli.command.is_none() {
-        println!("{MASCOT_COLOR}");
-    }
     let paths = resolve_paths()?;
     let _root_dir = &paths.root_dir;
     let config = load_config(&paths)?;
     let db = Database::open(&paths.db_file)?;
-    match cli.command.unwrap_or(Commands::List(ListArgs { json: false })) {
-        Commands::Add(args) => add_game(&db, args, &config.default_kill_list, config.default_priority),
-        Commands::Scan(args) => scan_games(&db, args, &config.default_kill_list, config.default_priority),
+    match cli.command {
+        Some(command) => execute_command(&db, &config, &paths.export_dir, command),
+        None => run_shell(&db, &config, &paths.export_dir),
+    }
+}
+
+fn execute_command(
+    db: &Database,
+    config: &crate::config::AppConfig,
+    export_dir: &Path,
+    command: Commands,
+) -> Result<()> {
+    match command {
+        Commands::Add(args) => add_game(&db, args, &config.default_kill_list, config.default_priority.clone()),
+        Commands::Scan(args) => scan_games(&db, args, &config.default_kill_list, config.default_priority.clone()),
         Commands::List(args) => list_games(&db, args),
         Commands::Launch(args) => launch_game(&db, &config, args),
         Commands::Import(args) => import_games(&db, &config, args),
         Commands::Config(args) => configure_game(&db, args),
-        Commands::Export(args) => export_game(&db, &config, &paths.export_dir, args),
+        Commands::Export(args) => export_game(&db, &config, export_dir, args),
     }
+}
+
+fn run_shell(db: &Database, config: &crate::config::AppConfig, export_dir: &Path) -> Result<()> {
+    println!("{MASCOT_COLOR}");
+    println!("Interactive mode. Type `help` for commands, `exit` to quit.");
+    loop {
+        print!("bolt> ");
+        io::stdout().flush()?;
+        let mut line = String::new();
+        match io::stdin().read_line(&mut line) {
+            Ok(0) => {
+                println!();
+                return Ok(());
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                println!();
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        }
+
+        let input = line.trim();
+        if input.is_empty() {
+            continue;
+        }
+        if matches!(input, "exit" | "quit") {
+            return Ok(());
+        }
+        if matches!(input, "help" | "?") {
+            print_shell_help();
+            continue;
+        }
+
+        let argv = match shell_argv(input) {
+            Ok(argv) => argv,
+            Err(error) => {
+                eprintln!("error: {error}");
+                continue;
+            }
+        };
+        match Cli::try_parse_from(argv) {
+            Ok(cli) => {
+                if let Some(command) = cli.command {
+                    if let Err(error) = execute_command(db, config, export_dir, command) {
+                        eprintln!("error: {error:#}");
+                    }
+                } else {
+                    print_shell_help();
+                }
+            }
+            Err(error) => {
+                let _ = error.print();
+            }
+        }
+    }
+}
+
+fn print_shell_help() {
+    println!("Commands: add | scan | list | launch | import | config | export");
+    println!("Aliases:  a   | s    | ls   | run    | sync   | cfg    | x");
+    println!("Examples:");
+    println!("  bolt> add");
+    println!("  bolt> add \"D:\\Games\\Game\\game.exe\" --name \"Game\"");
+    println!("  bolt> list");
+    println!("  bolt> launch cyberpunk");
+    println!("  bolt> export \"Game Name\"");
+}
+
+fn shell_argv(input: &str) -> Result<Vec<String>> {
+    let mut parts = shlex::split(input).ok_or_else(|| anyhow!("invalid quotes in command"))?;
+    if parts.is_empty() {
+        return Ok(vec!["bolt".to_string()]);
+    }
+    if parts[0].eq_ignore_ascii_case("bolt") {
+        parts.remove(0);
+    }
+    let mut argv = vec!["bolt".to_string()];
+    argv.extend(parts);
+    Ok(argv)
 }
 
 fn add_game(
@@ -305,7 +395,7 @@ fn sanitize_filename(value: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{parse_env_pairs, resolve_game};
+    use super::{parse_env_pairs, resolve_game, shell_argv};
     use crate::models::Game;
 
     #[test]
@@ -332,5 +422,11 @@ mod tests {
         ];
         let error = resolve_game(&games, "need", false).expect_err("ambiguous");
         assert!(error.to_string().contains("ambiguous"));
+    }
+
+    #[test]
+    fn shell_argv_handles_optional_prefix_and_quotes() {
+        let argv = shell_argv(r#"bolt launch "Need for Speed""#).expect("argv");
+        assert_eq!(argv, vec!["bolt", "launch", "Need for Speed"]);
     }
 }
