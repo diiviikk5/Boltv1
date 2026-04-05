@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 use crate::backends::{
     AmazonBackend, Backend, GogBackend, LegendaryBackend, SteamBackend, backend_for_source, import_from_all,
 };
-use crate::cli::{AddArgs, Cli, Commands, ConfigArgs, ExportArgs, ImportArgs, ImportSource, LaunchArgs, ListArgs, ScanArgs};
+use crate::cli::{AddArgs, BANNER, Cli, Commands, ConfigArgs, ExportArgs, ImportArgs, ImportSource, LaunchArgs, ListArgs, ScanArgs};
 use crate::config::{load as load_config, resolve_paths};
 use crate::db::Database;
 use crate::launcher;
@@ -20,6 +20,9 @@ use crate::models::{Game, PriorityClass, display_path, parse_affinity_mask};
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
+    if cli.command.is_none() {
+        println!("{BANNER}");
+    }
     let paths = resolve_paths()?;
     let _root_dir = &paths.root_dir;
     let config = load_config(&paths)?;

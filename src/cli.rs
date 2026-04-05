@@ -2,8 +2,22 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+pub const BANNER: &str = r#"
+ ____   ___   _  _____
+| __ ) / _ \ | ||_   _|
+|  _ \| | | || |  | |
+| |_) | |_| || |__| |
+|____/ \___/ |____|_|
+"#;
+
 #[derive(Debug, Parser)]
-#[command(name = "bolt", version, about = "Windows-first zero-bloat game launcher")]
+#[command(
+    name = "bolt",
+    version,
+    about = "Windows-first zero-bloat game launcher",
+    before_help = BANNER,
+    after_help = "Examples:\n  bolt add\n  bolt add \"D:\\Games\\Game\\game.exe\" --name \"Game\"\n  bolt launch cyberpunk\n  bolt import all\n  bolt export \"Game Name\""
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -11,12 +25,19 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(alias = "a")]
     Add(AddArgs),
+    #[command(alias = "s")]
     Scan(ScanArgs),
+    #[command(alias = "ls")]
     List(ListArgs),
+    #[command(alias = "run")]
     Launch(LaunchArgs),
+    #[command(alias = "sync")]
     Import(ImportArgs),
+    #[command(alias = "cfg")]
     Config(ConfigArgs),
+    #[command(alias = "x")]
     Export(ExportArgs),
 }
 
