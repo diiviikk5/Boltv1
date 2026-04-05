@@ -27,7 +27,7 @@ pub const MASCOT_COLOR: &str = concat!(
     version,
     about = "Windows-first zero-bloat game launcher",
     before_help = MASCOT_COLOR,
-    after_help = "Examples:\n  bolt add\n  bolt add \"D:\\Games\\Game\\game.exe\" --name \"Game\"\n  bolt launch cyberpunk\n  bolt import all\n  bolt export \"Game Name\""
+    after_help = "Examples:\n  bolt add\n  bolt add \"D:\\Games\\Game\\game.exe\" --name \"Game\"\n  bolt launch cyberpunk\n  bolt import all\n  bolt status\n  bolt tune \"Game Name\" --mode safe\n  bolt export \"Game Name\""
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -50,6 +50,10 @@ pub enum Commands {
     Config(ConfigArgs),
     #[command(alias = "x")]
     Export(ExportArgs),
+    #[command(alias = "st")]
+    Status,
+    #[command(alias = "t")]
+    Tune(TuneArgs),
 }
 
 #[derive(Debug, Args)]
@@ -129,6 +133,13 @@ pub struct ExportArgs {
     pub output: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+pub struct TuneArgs {
+    pub query: String,
+    #[arg(long, value_enum, default_value_t = TuneModeArg::Safe)]
+    pub mode: TuneModeArg,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum PriorityArg {
     Idle,
@@ -137,4 +148,10 @@ pub enum PriorityArg {
     AboveNormal,
     High,
     Realtime,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum TuneModeArg {
+    Safe,
+    Aggressive,
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::Path;
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
@@ -13,11 +14,14 @@ use walkdir::WalkDir;
 use crate::backends::{
     AmazonBackend, Backend, GogBackend, LegendaryBackend, SteamBackend, backend_for_source, import_from_all,
 };
-use crate::cli::{AddArgs, Cli, Commands, ConfigArgs, ExportArgs, ImportArgs, ImportSource, LaunchArgs, ListArgs, MASCOT_COLOR, ScanArgs};
+use crate::cli::{
+    AddArgs, Cli, Commands, ConfigArgs, ExportArgs, ImportArgs, ImportSource, LaunchArgs, ListArgs,
+    MASCOT_COLOR, ScanArgs, TuneArgs, TuneModeArg,
+};
 use crate::config::{load as load_config, resolve_paths};
 use crate::db::Database;
 use crate::launcher;
-use crate::models::{Game, PriorityClass, display_path, parse_affinity_mask};
+use crate::models::{Game, GameSource, PriorityClass, display_path, parse_affinity_mask};
 
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
@@ -45,6 +49,8 @@ fn execute_command(
         Commands::Import(args) => import_games(&db, &config, args),
         Commands::Config(args) => configure_game(&db, args),
         Commands::Export(args) => export_game(&db, &config, export_dir, args),
+        Commands::Status => show_status(&db, &config),
+        Commands::Tune(args) => tune_game(&db, args),
     }
 }
 
@@ -105,13 +111,15 @@ fn run_shell(db: &Database, config: &crate::config::AppConfig, export_dir: &Path
 }
 
 fn print_shell_help() {
-    println!("Commands: add | scan | list | launch | import | config | export");
-    println!("Aliases:  a   | s    | ls   | run    | sync   | cfg    | x");
+    println!("Commands: add | scan | list | launch | import | config | export | status | tune");
+    println!("Aliases:  a   | s    | ls   | run    | sync   | cfg    | x      | st     | t");
     println!("Examples:");
     println!("  bolt> add");
     println!("  bolt> add \"D:\\Games\\Game\\game.exe\" --name \"Game\"");
     println!("  bolt> list");
     println!("  bolt> launch cyberpunk");
+    println!("  bolt> status");
+    println!("  bolt> tune \"Game Name\" --mode safe");
     println!("  bolt> export \"Game Name\"");
 }
 
@@ -213,16 +221,25 @@ fn launch_game(db: &Database, config: &crate::config::AppConfig, args: LaunchArg
     let target = backend
         .launch(&game, config)?
         .ok_or_else(|| anyhow!("backend could not resolve a launch target"))?;
-    launcher::launch(&target, &game.profile)?;
+    let started = Instant::now();
+    let child = launcher::launch(&target, &game.profile)?;
     db.mark_launched(&game.id)?;
-    println!("Launched {}", game.name);
+    println!(
+        "Launched {} (pid={}, {} ms)",
+        game.name,
+        child.id(),
+        started.elapsed().as_millis()
+    );
     Ok(())
 }
 
 fn import_games(db: &Database, config: &crate::config::AppConfig, args: ImportArgs) -> Result<()> {
     let imported = match args.source {
         ImportSource::All => {
-            let games = import_from_all(config)?;
+            let mut games = import_from_all(config)?;
+            for game in &mut games {
+                apply_recommended_profile(game, TuneModeArg::Safe);
+            }
             for game in &games {
                 db.upsert_game(game)?;
             }
@@ -301,11 +318,113 @@ fn import_with_backend<B: Backend>(db: &Database, config: &crate::config::AppCon
     if !backend.detect(config) {
         return Ok(Vec::new());
     }
-    let games = backend.import_games(config)?;
+    let mut games = backend.import_games(config)?;
+    for game in &mut games {
+        apply_recommended_profile(game, TuneModeArg::Safe);
+    }
     for game in &games {
         db.upsert_game(game)?;
     }
     Ok(games)
+}
+
+fn show_status(db: &Database, config: &crate::config::AppConfig) -> Result<()> {
+    let games = db.list_games()?;
+    let (mut local, mut steam, mut epic, mut gog, mut amazon) = (0_u64, 0_u64, 0_u64, 0_u64, 0_u64);
+    for game in games {
+        match game.source {
+            GameSource::Local => local += 1,
+            GameSource::Steam => steam += 1,
+            GameSource::Epic => epic += 1,
+            GameSource::Gog => gog += 1,
+            GameSource::Amazon => amazon += 1,
+        }
+    }
+    println!("Library: local={local} steam={steam} epic={epic} gog={gog} amazon={amazon}");
+    println!("Backends:");
+    println!(
+        "  steam    : {}",
+        if SteamBackend.detect(config) { "ready" } else { "missing (Steam install not detected)" }
+    );
+    println!(
+        "  epic     : {}",
+        if LegendaryBackend.detect(config) { "ready (legendary found)" } else { "missing (legendary not found)" }
+    );
+    println!(
+        "  gog      : {}",
+        if GogBackend.detect(config) { "ready (gogdl found)" } else { "missing (gogdl not found)" }
+    );
+    println!(
+        "  amazon   : {}",
+        if AmazonBackend.detect(config) { "ready (amazon helper found)" } else { "missing (helper not found)" }
+    );
+    Ok(())
+}
+
+fn tune_game(db: &Database, args: TuneArgs) -> Result<()> {
+    let games = db.list_games()?;
+    let mut game = resolve_game(&games, &args.query, false)?;
+    apply_recommended_profile(&mut game, args.mode);
+    game.updated_at = Utc::now();
+    db.update_game(&game)?;
+    println!(
+        "Tuned {} -> priority={:?}, kill_rules={}",
+        game.name,
+        game.profile.priority,
+        game.profile.kill_after_launch.join(",")
+    );
+    Ok(())
+}
+
+fn apply_recommended_profile(game: &mut Game, mode: TuneModeArg) {
+    if !game.profile.kill_after_launch.is_empty() {
+        return;
+    }
+    let (priority, kill_list): (PriorityClass, Vec<String>) = match (game.source.clone(), mode) {
+        (GameSource::Local, TuneModeArg::Safe) => (PriorityClass::AboveNormal, vec![]),
+        (GameSource::Local, TuneModeArg::Aggressive) => (
+            PriorityClass::High,
+            vec![
+                "steam.exe".into(),
+                "epicgameslauncher.exe".into(),
+                "riotclientservices.exe".into(),
+            ],
+        ),
+        (GameSource::Steam, TuneModeArg::Safe) => (
+            PriorityClass::AboveNormal,
+            vec!["steamwebhelper.exe".into(), "steamservice.exe".into()],
+        ),
+        (GameSource::Steam, TuneModeArg::Aggressive) => (
+            PriorityClass::High,
+            vec!["steamwebhelper.exe".into(), "steam.exe".into()],
+        ),
+        (GameSource::Epic, TuneModeArg::Safe) => (
+            PriorityClass::AboveNormal,
+            vec!["epicwebhelper.exe".into(), "epicgameslauncher.exe".into()],
+        ),
+        (GameSource::Epic, TuneModeArg::Aggressive) => (
+            PriorityClass::High,
+            vec!["epicwebhelper.exe".into(), "epicgameslauncher.exe".into()],
+        ),
+        (GameSource::Gog, TuneModeArg::Safe) => (
+            PriorityClass::AboveNormal,
+            vec!["galaxyclient.exe".into(), "galaxyclient helper.exe".into()],
+        ),
+        (GameSource::Gog, TuneModeArg::Aggressive) => (
+            PriorityClass::High,
+            vec!["galaxyclient.exe".into(), "galaxyclient helper.exe".into()],
+        ),
+        (GameSource::Amazon, TuneModeArg::Safe) => (
+            PriorityClass::AboveNormal,
+            vec!["amazon games ui.exe".into()],
+        ),
+        (GameSource::Amazon, TuneModeArg::Aggressive) => (
+            PriorityClass::High,
+            vec!["amazon games ui.exe".into(), "amazon games.exe".into()],
+        ),
+    };
+    game.profile.priority = priority;
+    game.profile.kill_after_launch = kill_list;
 }
 
 fn validate_executable(path: &Path) -> Result<()> {
@@ -395,8 +514,9 @@ fn sanitize_filename(value: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{parse_env_pairs, resolve_game, shell_argv};
-    use crate::models::Game;
+    use super::{apply_recommended_profile, parse_env_pairs, resolve_game, shell_argv};
+    use crate::cli::TuneModeArg;
+    use crate::models::{Game, GameSource};
 
     #[test]
     fn parse_env_pairs_requires_equals() {
@@ -428,5 +548,13 @@ mod tests {
     fn shell_argv_handles_optional_prefix_and_quotes() {
         let argv = shell_argv(r#"bolt launch "Need for Speed""#).expect("argv");
         assert_eq!(argv, vec!["bolt", "launch", "Need for Speed"]);
+    }
+
+    #[test]
+    fn tune_profile_sets_epic_kill_rules() {
+        let mut game = Game::local("Fortnite".into(), PathBuf::from(r"C:\Games\FN\fn.exe"));
+        game.source = GameSource::Epic;
+        apply_recommended_profile(&mut game, TuneModeArg::Safe);
+        assert!(game.profile.kill_after_launch.iter().any(|v| v == "epicgameslauncher.exe"));
     }
 }

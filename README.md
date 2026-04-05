@@ -38,6 +38,8 @@ bolt scan "D:\Games"
 bolt list
 bolt launch "my game"
 bolt import all
+bolt status
+bolt tune "my game" --mode safe
 bolt config "my game" --show
 bolt export "my game"
 ```
@@ -51,3 +53,13 @@ bolt export "my game"
 - `bolt sync` -> `bolt import`
 - `bolt cfg` -> `bolt config`
 - `bolt x` -> `bolt export`
+- `bolt st` -> `bolt status`
+- `bolt t` -> `bolt tune`
+
+## Why this is useful
+
+- Fast local launch path with explicit `cwd`, args, env, and per-game profile overrides.
+- One library for local + store-imported games, with fuzzy launch and export scripts.
+- Persistent shell mode (`bolt`) for quick repeated actions without reopening commands.
+- `bolt status` gives backend readiness and source counts in one glance.
+- `bolt tune` applies source-aware cleanup/performance presets so Steam/Epic/GOG background noise is reduced by default after import.
