@@ -2,20 +2,31 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
-pub const BANNER: &str = r#"
- ____   ___   _  _____
-| __ ) / _ \ | ||_   _|
-|  _ \| | | || |  | |
-| |_) | |_| || |__| |
-|____/ \___/ |____|_|
-"#;
+pub const MASCOT_COLOR: &str = concat!(
+    "\x1b[38;5;45m⠀⠀⣀⣀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;81m⢠⣾⠟⠉⠉⠛⠿⢶⣤⣀⠀⣀⣀⣀⣀⣀⣀⡀⠀⠀⠀⠀⣀⣠⣴⠶⠶⢶⣦⡀\x1b[0m\n",
+    "\x1b[38;5;117m⢸⡇⠀⠀⠀⠀⠀⠀⠈⠛⡛⠙⠉⡹⠙⠛⠋⠟⠛⠶⣶⡿⠋⠉⠀⠀⠀⠀⢹⣧\x1b[0m\n",
+    "\x1b[38;5;123m⢸⡇⠀⠀⠀⠀⠀⠀⠀⢰⠁⡄⠀⡇⢸⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⡇\x1b[0m\n",
+    "\x1b[38;5;159m⠘⠿⠀⠀⠀⠀⠀⠀⠀⠀⠉⠁⠀⠀⠀⠀⠈⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣾⠃\x1b[0m\n",
+    "\x1b[38;5;153m⠀⠀⠀⢀⣠⣤⣤⣤⣄⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠿⠏⠀\x1b[0m\n",
+    "\x1b[38;5;147m⠀⠀⣰⡟⠁⠀⠀⠙⣿⣿⡄⠀⠒⠀⠀⠀⠀⠀⢀⣤⡴⠛⠛⠻⣷⣦⡀⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;111m⠀⠀⣿⣇⠀⠀⢀⣰⣿⣿⣿⡄⠀⠀⠀⠀⠀⢀⣾⡏⠀⠀⠀⠀⢈⣿⣿⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;75m⠀⠀⢿⣿⣿⣿⣿⣿⣿⣿⣿⡧⠀⠀⠀⠀⠀⣼⣿⣧⣤⣤⣤⣴⣿⣿⣿⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;69m⢀⠂⠉⡻⢿⣿⣿⣿⣏⢹⣿⠇⠀⠀⠀⠀⠀⣿⣿⣿⣿⡟⢿⣿⣿⣿⠃⣀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;63m⠀⠉⠙⠿⣦⣍⡛⠛⠛⠉⠁⠀⠀⠀⠀⠀⠀⠈⠛⠿⠿⠷⢟⣛⣽⡧⠤⠔⠀⠀\x1b[0m\n",
+    "\x1b[38;5;99m⠀⠀⠀⠀⠈⠙⠛⢿⣶⣶⣦⣤⡀⠀⣀⣀⣤⣀⣤⣤⣴⡾⠟⠛⠉⠀⠀⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;135m⠀⠀⠀⠀⠀⠀⠀⠘⣿⡆⠀⠙⠿⠿⠛⠉⣉⣽⡿⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;171m⠀⠀⠀⠀⠀⠀⠀⠀⠸⣧⣠⣴⠶⢶⣤⣴⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\x1b[0m\n",
+    "\x1b[38;5;207m⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠛⠃⠀⠀⠛⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀\x1b[0m\n",
+    "\x1b[1;38;5;45mBOLT\x1b[0m \x1b[38;5;252mWindows-first zero-bloat game launcher\x1b[0m\n"
+);
 
 #[derive(Debug, Parser)]
 #[command(
     name = "bolt",
     version,
     about = "Windows-first zero-bloat game launcher",
-    before_help = BANNER,
+    before_help = MASCOT_COLOR,
     after_help = "Examples:\n  bolt add\n  bolt add \"D:\\Games\\Game\\game.exe\" --name \"Game\"\n  bolt launch cyberpunk\n  bolt import all\n  bolt export \"Game Name\""
 )]
 pub struct Cli {
