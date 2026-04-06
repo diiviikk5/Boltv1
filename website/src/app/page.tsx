@@ -1,3 +1,5 @@
+"use client";
+
 import { motion, useScroll, useTransform } from "framer-motion";
 import { Terminal, Zap, Code, Shield } from "lucide-react";
 import React from "react";
